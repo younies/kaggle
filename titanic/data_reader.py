@@ -136,9 +136,10 @@ def _print_brief_overview(
 
 
 def main() -> None:
+    # Show data overview
     X, y, _, feature_names = prepare_training_data()
     _print_brief_overview(X, y, feature_names)
 
 
 if __name__ == "__main__":
-    main()
+    trained_model = main()
