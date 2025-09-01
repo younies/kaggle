@@ -9,7 +9,7 @@ from typing import Optional
 import pandas as pd
 
 from data_reader import extract_title, get_project_root
-from training import train_best_model_with_tuning
+from training import train_best_model_with_tuning, train_voting_ensemble
 
 
 def load_test_data(csv_path: Optional[Path | str] = None) -> pd.DataFrame:
@@ -71,7 +71,7 @@ def preprocess_test_data(df: pd.DataFrame, train_df: pd.DataFrame) -> pd.DataFra
     return X_final
 
 
-def generate_submission(model_type: str = "tuned", output_file: str = "submission.csv") -> None:
+def generate_submission(model_type: str = "ensemble", output_file: str = "submission.csv") -> None:
     """Generate Kaggle submission file.
     
     Args:
@@ -102,6 +102,9 @@ def generate_submission(model_type: str = "tuned", output_file: str = "submissio
         from training import train_logistic_regression
         model, train_accuracy, _, _, _, _ = train_logistic_regression()
         print(f"Model trained with accuracy: {train_accuracy:.4f}")
+    elif model_type == "ensemble":
+        model, cv_acc = train_voting_ensemble()
+        print(f"Voting ensemble CV accuracy: {cv_acc:.4f}")
     else:
         # Use a simpler Random Forest to avoid overfitting
         from sklearn.ensemble import RandomForestClassifier

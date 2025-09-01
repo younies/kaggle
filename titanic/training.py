@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
@@ -116,6 +116,37 @@ def train_best_model_with_tuning(csv_path: Optional[Path | str] = None, test_siz
     return best_model, test_accuracy, X_test, y_test
 
 
+def train_voting_ensemble(csv_path: Optional[Path | str] = None) -> Tuple[VotingClassifier, float]:
+    """Train a soft-voting ensemble (LR + RF + GB) and report CV accuracy."""
+    X, y, _, _ = prepare_training_data(csv_path)
+
+    lr = LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)
+    rf = RandomForestClassifier(
+        n_estimators=300,
+        max_depth=6,
+        min_samples_split=5,
+        min_samples_leaf=3,
+        random_state=42,
+    )
+    gb = GradientBoostingClassifier(random_state=42)
+
+    ensemble = VotingClassifier(
+        estimators=[("lr", lr), ("rf", rf), ("gb", gb)],
+        voting="soft",
+        n_jobs=None,
+        flatten_transform=True,
+    )
+
+    # Cross-validated score for a quick sanity check
+    cv_scores = cross_val_score(ensemble, X, y, cv=5, scoring="accuracy")
+    cv_mean = float(cv_scores.mean())
+
+    # Fit on full training data
+    ensemble.fit(X, y)
+
+    return ensemble, cv_mean
+
+
 def train_logistic_regression(
     csv_path: Optional[Path | str] = None, test_size: float = 0.2, random_state: int = 42
 ) -> Tuple[LogisticRegression, float, np.ndarray, np.ndarray, pd.Series, pd.Series]:
@@ -140,13 +171,13 @@ def train_logistic_regression(
 
 
 def _print_model_results(model: LogisticRegression, accuracy: float, X_test: np.ndarray, y_test: pd.Series) -> None:
-    print(f"\nLogistic Regression Results:")
+    print("\nLogistic Regression Results:")
     print(f"Test Accuracy: {accuracy:.4f}")
     print(f"Model coefficients shape: {model.coef_.shape}")
     
     # Predictions on test set
     y_pred = model.predict(X_test)
-    print(f"\nClassification Report:")
+    print("\nClassification Report:")
     print(classification_report(y_test, y_pred))
 
 
@@ -192,7 +223,7 @@ def main():
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred))
     
-    print(f"\nOptimized model is ready for predictions!")
+    print("\nOptimized model is ready for predictions!")
     return tuned_model
 
 
