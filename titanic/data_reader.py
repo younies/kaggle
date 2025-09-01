@@ -29,45 +29,93 @@ def load_train_dataframe(csv_path: Optional[Path | str] = None) -> pd.DataFrame:
     return pd.read_csv(csv_path)
 
 
+def extract_title(name: str) -> str:
+    """Extract title from passenger name."""
+    if pd.isna(name):
+        return "Unknown"
+    
+    title = name.split(',')[1].split('.')[0].strip()
+    # Group rare titles
+    title_mapping = {
+        'Mr': 'Mr',
+        'Miss': 'Miss',
+        'Mrs': 'Mrs',
+        'Master': 'Master',
+        'Dr': 'Rare',
+        'Rev': 'Rare',
+        'Col': 'Rare',
+        'Major': 'Rare',
+        'Mlle': 'Miss',
+        'Countess': 'Rare',
+        'Ms': 'Miss',
+        'Lady': 'Rare',
+        'Jonkheer': 'Rare',
+        'Don': 'Rare',
+        'Dona': 'Rare',
+        'Mme': 'Mrs',
+        'Capt': 'Rare',
+        'Sir': 'Rare'
+    }
+    return title_mapping.get(title, 'Rare')
+
+
 def split_features_and_target(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
-    """Split the raw dataframe into features X and target y.
+    """Split the raw dataframe into features X and target y with advanced feature engineering.
 
     - Target: Survived
-    - Features used: Pclass, Sex, Age, SibSp, Parch, Fare, Embarked
+    - Features: Enhanced with family size, title, age groups, fare groups, etc.
     """
     required_columns: List[str] = [
-        "Survived",
-        "Pclass",
-        "Sex",
-        "Age",
-        "SibSp",
-        "Parch",
-        "Fare",
-        "Embarked",
+        "Survived", "Pclass", "Sex", "Age", "SibSp", "Parch", 
+        "Fare", "Embarked", "Name"
     ]
     missing = [c for c in required_columns if c not in df.columns]
     if missing:
         raise ValueError("train.csv is missing required columns: " + ", ".join(missing))
 
+    # Create enhanced feature set
+    X = df.copy()
+    
+    # Family size engineering
+    X['FamilySize'] = X['SibSp'] + X['Parch'] + 1
+    X['IsAlone'] = (X['FamilySize'] == 1).astype(int)
+    X['SmallFamily'] = ((X['FamilySize'] >= 2) & (X['FamilySize'] <= 4)).astype(int)
+    X['LargeFamily'] = (X['FamilySize'] > 4).astype(int)
+    
+    # Title extraction
+    X['Title'] = X['Name'].apply(extract_title)
+    
+    # Age groups (fill missing ages with median first for grouping)
+    age_median = X['Age'].median()
+    X['Age_filled'] = X['Age'].fillna(age_median)
+    X['AgeGroup'] = pd.cut(X['Age_filled'], bins=[0, 12, 18, 35, 60, 100], 
+                          labels=['Child', 'Teen', 'Adult', 'MiddleAge', 'Senior'])
+    X['IsChild'] = (X['Age_filled'] <= 12).astype(int)
+    
+    # Fare groups
+    X['FareGroup'] = pd.qcut(X['Fare'].fillna(X['Fare'].median()), 
+                            q=4, labels=['Low', 'Medium', 'High', 'VeryHigh'])
+    
+    # Select final features
+    feature_columns = [
+        'Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Embarked',
+        'FamilySize', 'IsAlone', 'SmallFamily', 'LargeFamily', 
+        'Title', 'AgeGroup', 'IsChild', 'FareGroup'
+    ]
+    
     y = df["Survived"].astype(int)
-    X = df[
-        [
-            "Pclass",
-            "Sex",
-            "Age",
-            "SibSp",
-            "Parch",
-            "Fare",
-            "Embarked",
-        ]
-    ].copy()
-    return X, y
+    X_final = X[feature_columns].copy()
+    
+    return X_final, y
 
 
 def build_preprocessor() -> ColumnTransformer:
     """Create a ColumnTransformer that imputes and encodes features for ML models."""
-    numeric_features: List[str] = ["Pclass", "Age", "SibSp", "Parch", "Fare"]
-    categorical_features: List[str] = ["Sex", "Embarked"]
+    numeric_features: List[str] = [
+        "Pclass", "Age", "SibSp", "Parch", "Fare", "FamilySize", 
+        "IsAlone", "SmallFamily", "LargeFamily", "IsChild"
+    ]
+    categorical_features: List[str] = ["Sex", "Embarked", "Title", "AgeGroup", "FareGroup"]
 
     numeric_pipeline = Pipeline(
         steps=[
