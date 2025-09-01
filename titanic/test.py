@@ -22,8 +22,8 @@ def load_test_data(csv_path: Optional[Path | str] = None) -> pd.DataFrame:
     return pd.read_csv(csv_path)
 
 
-def preprocess_test_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply the same feature engineering to test data as used in training."""
+def preprocess_test_data(df: pd.DataFrame, train_df: pd.DataFrame) -> pd.DataFrame:
+    """Apply the same feature engineering to test data using TRAINING data statistics."""
     # Create enhanced feature set (same as in training)
     X = df.copy()
     
@@ -36,23 +36,35 @@ def preprocess_test_data(df: pd.DataFrame) -> pd.DataFrame:
     # Title extraction
     X['Title'] = X['Name'].apply(extract_title)
     
-    # Age groups (fill missing ages with median first for grouping)
-    age_median = X['Age'].median()
-    X['Age_filled'] = X['Age'].fillna(age_median)
+    # Age groups - USE TRAINING DATA MEDIAN!
+    train_age_median = train_df['Age'].median()
+    X['Age_filled'] = X['Age'].fillna(train_age_median)
     X['AgeGroup'] = pd.cut(X['Age_filled'], bins=[0, 12, 18, 35, 60, 100], 
                           labels=['Child', 'Teen', 'Adult', 'MiddleAge', 'Senior'])
     X['IsChild'] = (X['Age_filled'] <= 12).astype(int)
     
-    # Fare groups (handle missing fares)
-    fare_median = X['Fare'].median()
-    X['FareGroup'] = pd.qcut(X['Fare'].fillna(fare_median), 
-                            q=4, labels=['Low', 'Medium', 'High', 'VeryHigh'])
+    # Deck extraction from Cabin (first letter), unknown as 'U'
+    X['Deck'] = X['Cabin'].fillna('U').astype(str).str[0]
+
+    # Fare per person (avoid divide by zero)
+    X['FarePerPerson'] = X['Fare'] / (X['SibSp'] + X['Parch'] + 1)
+
+    # Fare groups - USE TRAINING DATA STATISTICS!
+    train_fare_median = train_df['Fare'].median()
+    train_fare_filled = train_df['Fare'].fillna(train_fare_median)
+    
+    # Get quartile boundaries from training data
+    _, fare_bins = pd.qcut(train_fare_filled, q=4, retbins=True, labels=['Low', 'Medium', 'High', 'VeryHigh'])
+    
+    # Apply same boundaries to test data
+    X['FareGroup'] = pd.cut(X['Fare'].fillna(train_fare_median), 
+                           bins=fare_bins, labels=['Low', 'Medium', 'High', 'VeryHigh'], include_lowest=True)
     
     # Select the same features used in training
     feature_columns = [
         'Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Embarked',
         'FamilySize', 'IsAlone', 'SmallFamily', 'LargeFamily', 
-        'Title', 'AgeGroup', 'IsChild', 'FareGroup'
+        'Title', 'AgeGroup', 'IsChild', 'FareGroup', 'Deck', 'FarePerPerson'
     ]
     
     X_final = X[feature_columns].copy()
@@ -72,8 +84,12 @@ def generate_submission(model_type: str = "tuned", output_file: str = "submissio
     test_df = load_test_data()
     passenger_ids = test_df['PassengerId'].copy()
     
-    # Preprocess test data with same feature engineering
-    X_test = preprocess_test_data(test_df)
+    # Load training data to get consistent preprocessing statistics
+    from data_reader import load_train_dataframe
+    train_df = load_train_dataframe()
+    
+    # Preprocess test data using training data statistics
+    X_test = preprocess_test_data(test_df, train_df)
     
     print(f"Test data shape: {X_test.shape}")
     print(f"Number of passengers: {len(passenger_ids)}")
@@ -81,15 +97,33 @@ def generate_submission(model_type: str = "tuned", output_file: str = "submissio
     # Train the model (or load if you have a saved one)
     print(f"\nTraining {model_type} model...")
     
-    if model_type == "tuned":
-        # Get the best tuned model
-        model, train_accuracy, _, _ = train_best_model_with_tuning()
-        print(f"Model trained with accuracy: {train_accuracy:.4f}")
-    else:
-        # Use simple logistic regression
+    if model_type == "simple":
+        # Use simple logistic regression to avoid overfitting
         from training import train_logistic_regression
         model, train_accuracy, _, _, _, _ = train_logistic_regression()
         print(f"Model trained with accuracy: {train_accuracy:.4f}")
+    else:
+        # Use a simpler Random Forest to avoid overfitting
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.model_selection import cross_val_score
+        from data_reader import prepare_training_data
+        
+        X_train_full, y_train_full, _, _ = prepare_training_data()
+        
+        # Use simpler Random Forest parameters
+        model = RandomForestClassifier(
+            n_estimators=100, 
+            max_depth=6,  # Reduced from 10
+            min_samples_split=5,  # Increased from 2
+            min_samples_leaf=3,   # Increased from 2
+            random_state=42
+        )
+        model.fit(X_train_full, y_train_full)
+        
+        # Check CV score
+        cv_scores = cross_val_score(model, X_train_full, y_train_full, cv=5)
+        train_accuracy = cv_scores.mean()
+        print(f"Simplified RF CV accuracy: {train_accuracy:.4f}")
     
     # Get the same preprocessor used in training
     print("\nPreprocessing test data...")

@@ -92,6 +92,12 @@ def split_features_and_target(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series
                           labels=['Child', 'Teen', 'Adult', 'MiddleAge', 'Senior'])
     X['IsChild'] = (X['Age_filled'] <= 12).astype(int)
     
+    # Deck extraction from Cabin (first letter), unknown as 'U'
+    X['Deck'] = X['Cabin'].fillna('U').astype(str).str[0]
+
+    # Fare per person (avoid divide by zero)
+    X['FarePerPerson'] = X['Fare'] / X['FamilySize'].replace(0, 1)
+
     # Fare groups
     X['FareGroup'] = pd.qcut(X['Fare'].fillna(X['Fare'].median()), 
                             q=4, labels=['Low', 'Medium', 'High', 'VeryHigh'])
@@ -100,7 +106,7 @@ def split_features_and_target(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series
     feature_columns = [
         'Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Embarked',
         'FamilySize', 'IsAlone', 'SmallFamily', 'LargeFamily', 
-        'Title', 'AgeGroup', 'IsChild', 'FareGroup'
+        'Title', 'AgeGroup', 'IsChild', 'FareGroup', 'Deck', 'FarePerPerson'
     ]
     
     y = df["Survived"].astype(int)
@@ -113,9 +119,9 @@ def build_preprocessor() -> ColumnTransformer:
     """Create a ColumnTransformer that imputes and encodes features for ML models."""
     numeric_features: List[str] = [
         "Pclass", "Age", "SibSp", "Parch", "Fare", "FamilySize", 
-        "IsAlone", "SmallFamily", "LargeFamily", "IsChild"
+        "IsAlone", "SmallFamily", "LargeFamily", "IsChild", "FarePerPerson"
     ]
-    categorical_features: List[str] = ["Sex", "Embarked", "Title", "AgeGroup", "FareGroup"]
+    categorical_features: List[str] = ["Sex", "Embarked", "Title", "AgeGroup", "FareGroup", "Deck"]
 
     numeric_pipeline = Pipeline(
         steps=[
